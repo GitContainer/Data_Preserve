@@ -17,7 +17,7 @@
    limitations under the License.
 """
 
-from eip import PLC
+from pylogix import PLC
 from ping3 import ping
 import configparser
 import sys
@@ -25,15 +25,17 @@ import time
 from pathlib import Path
 from progress.bar import Bar
 import datetime
+import re
 
 # variables are read from Settings.ini
 main_controller_ip = ''
 dp_save_file_path = ''
 tags_list = []
+tag_types = ["BOOL", "BIT", "REAL", "DINT", "SINT"] # Might want to add this to settings?
 files = []
 file_extension = ''
 comm = PLC()
-CODE_VERSION = "1.0.3"
+CODE_VERSION = "1.0.5"
 log = open("log.txt", "a+")
 now = datetime.datetime.now()
 checkErrorLog = False
@@ -46,11 +48,15 @@ def get_data_preserve(file):
     with open(dp_save_file_path + file + "." + file_extension) as f:
         all_lines = f.readlines()
 
+    # need to check empty lines, and more than one tag in one line here
+    all_lines = remove_empty(all_lines)
+    all_lines = check_multiple(all_lines)
+
     print("Config file: {}".format(file))
     bar = Bar('Saving', max=len(all_lines))
 
     for index in range(len(all_lines)):
-        process_line_save(all_lines[index], index + 1, file)
+        process_line_save(all_lines[index] + "\n", index + 1, file)
         bar.next()
     bar.finish()
     print("\n")
@@ -64,6 +70,7 @@ def load_verify_data_preserve(file, verify_only=False):
     with open(dp_save_file_path + file + "_Save." + file_extension) as f:
         all_lines = f.readlines()
 
+    all_lines = remove_empty(all_lines)
     print("Config file: {}".format(file))
     bar = Bar('Loading', max=len(all_lines))
     bar2 = Bar('Verifying', max=len(all_lines))
@@ -94,6 +101,48 @@ def read_tag(tag):
     return comm.Read(tag)
 
 
+def remove_empty(lines):
+    clean_list = []
+    # first remove return line
+    clean_list = [line.rstrip('\n') for line in lines]
+    # remove empty items
+    clean_list = list(filter(None, clean_list))
+    return clean_list
+
+
+def check_multiple(lines):
+    clean_list = []
+    line_list = []
+    current_tag_type = ""
+    # if the tag type is in the same line twice
+    # search if there are more than two |
+    for line in lines:
+        if line.count("|") > 2:
+            print("There is more than one tag")
+            # process line here, and split into more items
+            clean_list.extend(split_tag_lines(line))
+        else:
+            clean_list.append(line)
+    return clean_list
+
+
+def split_tag_lines(line):
+    how_many_tags = 0
+    split_tags = []
+    clean_list = []
+    current_tag_type = ""
+    # count how many tags for each two || is one tag
+    how_many_tags = line.count("|") // 2
+
+    split_tags = re.split(r'(DINT|BOOL|SINT|BIT|REAL)', line)
+
+    # append to list
+    for i in range(0, how_many_tags*2, 2):
+        clean_list.append(split_tags[i] + split_tags[i+1])
+
+    return clean_list
+
+
 def process_line_save(line, line_number, file_name):
     global tags_list
     global checkErrorLog
@@ -109,8 +158,8 @@ def process_line_save(line, line_number, file_name):
         # append to list
         tags_list.append(put_string)
 
-    except ValueError:
-        log.write("%s Save Error: %s line %s %s doesn't exists!\n" % (now.strftime("%c"), file_name, line_number, plc_tag))
+    except ValueError as e:
+        log.write("%s Save Error: %s line %s %s\n" % (now.strftime("%c"), file_name, line_number, e))
         checkErrorLog = True
 
 
@@ -131,8 +180,8 @@ def process_line_load(line, line_number, file_name):
 
     try:
         comm.Write(plc_tag, dp_value)
-    except ValueError:
-        log.write("%s Load Error: %s line %s %s doesn't exists!\n" % (now.strftime("%c"), file_name, line_number, plc_tag))
+    except ValueError as e: #Remove ValueError
+        log.write("%s Load Error: %s line %s %s\n" % (now.strftime("%c"), file_name, line_number, e))
         checkErrorLog = True
 
 
@@ -143,8 +192,8 @@ def process_line_verification(line, line_number, file_name):
 
     try:
         str_tag = str(read_tag(plc_tag))
-    except ValueError:
-        log.write("%s Verify Error: %s line %s %s doesn't exists!\n" % (now.strftime("%c"), file_name, line_number, plc_tag))
+    except ValueError as e:
+        log.write("%s Verify Error: %s line %s %s\n" % (now.strftime("%c"), file_name, line_number, e))
         str_tag = "None"
         checkErrorLog = True
 
@@ -183,9 +232,9 @@ if __name__ == '__main__':
     answer = input('Options [save, load, verify]\n')
 
     # ping doesn't work on softlogix so uncomment when ready to ship
-    if ping(main_controller_ip) is None:
-        print("Check Settings.ini or ethernet connection!")
-        sys.exit()
+     if ping(main_controller_ip) is None:
+         print("Check Settings.ini or ethernet connection!")
+         sys.exit()
 
     if answer == "load":
         if yes_or_no("Are you sure?"):
