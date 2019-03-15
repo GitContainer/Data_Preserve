@@ -35,7 +35,7 @@ tag_types = ["BOOL", "BIT", "REAL", "DINT", "SINT"] # Might want to add this to 
 files = []
 file_extension = ''
 comm = PLC()
-CODE_VERSION = "1.0.5"
+CODE_VERSION = "1.0.6"
 log = open("log.txt", "a+")
 now = datetime.datetime.now()
 checkErrorLog = False
@@ -50,7 +50,7 @@ def get_data_preserve(file):
 
     # need to check empty lines, and more than one tag in one line here
     all_lines = remove_empty(all_lines)
-    all_lines = check_multiple(all_lines)
+    all_lines = check_multiple(all_lines, file)
 
     print("Config file: {}".format(file))
     bar = Bar('Saving', max=len(all_lines))
@@ -110,19 +110,20 @@ def remove_empty(lines):
     return clean_list
 
 
-def check_multiple(lines):
+def check_multiple(lines, file_name):
     clean_list = []
     line_list = []
     current_tag_type = ""
     # if the tag type is in the same line twice
-    # search if there are more than two |
-    for line in lines:
-        if line.count("|") > 2:
-            print("There is more than one tag")
+    # search if there are more than two
+    for index in range(len(lines)):
+        if lines[index].count("|") > 2:
+            log.write("%s Save Info: %s line %s Multiple tags in one line\n" % (now.strftime("%c"), file_name, index+1))
             # process line here, and split into more items
-            clean_list.extend(split_tag_lines(line))
+            clean_list.extend(split_tag_lines(lines[index]))
         else:
-            clean_list.append(line)
+            clean_list.append(lines[index])
+
     return clean_list
 
 
@@ -180,7 +181,7 @@ def process_line_load(line, line_number, file_name):
 
     try:
         comm.Write(plc_tag, dp_value)
-    except ValueError as e: #Remove ValueError
+    except ValueError as e:
         log.write("%s Load Error: %s line %s %s\n" % (now.strftime("%c"), file_name, line_number, e))
         checkErrorLog = True
 
@@ -232,9 +233,9 @@ if __name__ == '__main__':
     answer = input('Options [save, load, verify]\n')
 
     # ping doesn't work on softlogix so uncomment when ready to ship
-     if ping(main_controller_ip) is None:
-         print("Check Settings.ini or ethernet connection!")
-         sys.exit()
+    if ping(main_controller_ip) is None:
+        print("Check Settings.ini or ethernet connection!")
+        sys.exit()
 
     if answer == "load":
         if yes_or_no("Are you sure?"):
